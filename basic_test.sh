@@ -1,0 +1,1 @@
+curl http://$1:5000/groups/mmo/events/raid1/compute
