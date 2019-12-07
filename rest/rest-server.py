@@ -303,8 +303,14 @@ def calc_allocation(group_name, event_name):
 
     connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
     channel = connection.channel()
-    channel.exchange_declare(exchange='toWorker', exchange_type='direct')
-    channel.basic_publish(exchange='toWorker', routing_key='work', body=message)
+
+    channel.queue_declare(queue='toMaster', durable=True)
+
+#    channel.exchange_declare(exchange='toWorker', exchange_type='direct')
+#    channel.basic_publish(exchange='toWorker', routing_key='work', body=message)
+
+    channel.basic_publish(exchange='', routing_key='toMaster', body=message, properties=pika.BasicProperties(delivery_mode=2))
+
     channel.close()
 
     status = 200
