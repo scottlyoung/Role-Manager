@@ -7,6 +7,8 @@ import jsonpickle
 import pika
 import copy
 import os
+import uuid
+import pickle
 
 '''
 import googleapiclient.discovery
@@ -80,8 +82,6 @@ def search(body):
             else:
                 ind += 1
         if ind_found:
-            #log("search case: " + str(case), 'debug')
-            #log("search Ind: " + str(ind), 'debug')
             member = case[ind][0]
             log('search Member: ' + str(member), 'debug')
             roles = prefs[member][0].keys()
@@ -91,6 +91,18 @@ def search(body):
                 stack.append(alloc)
 
     return best
+
+
+def task_callback(ch, method, properties, body, best, tasks):
+    task_id, res = pickle.loads(body)
+    if res[1] > best[0][1]:
+        best[0] = res
+
+    tasks[task_id] = True
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+    if False not in tasks.values():
+        ch.stop_consuming()
+    return
 
 
 def callback(ch, method, properties, body):
@@ -115,26 +127,39 @@ def callback(ch, method, properties, body):
     for member in mem:
         prefs[member] = ({}, db_mem_hist.get(member))
         roles = db_mem_roles.hgetall(member)
-        log("Roles: " + str(roles), 'debug')
+        #log("Roles: " + str(roles), 'debug')
         n = len(roles)
         for role in roles:
             prefs[member][0][role] = roles[role]
 
-    stack = [(allocations,0)]
+    stack = [(allocations, 0)]
 
-    best = (None,0)
+    best = [(None, 0)]
 
-    log('Prefs: ' + str(prefs), 'debug')
+    tasks = {}
+
+    #log('Prefs: ' + str(prefs), 'debug')
+
+    connection = pika.BlockingConnection(pika.ConnectionParameters("rabbitmq"))
+    channel = connection.channel()
+    channel.queue_declare(queue='toSlave', durable=True)
+
+    channel.exchange_declare(exchange='fromSlave', exchange_type='direct')
+    result = channel.queue_declare(queue='', exclusive=True)
+    queue_name = result.method.queue
+    channel.queue_bind(exchange='fromSlave', queue=queue_name, routing_key=str(ID))
 
     n = len(allocations)
     while stack:
         case = stack.pop()
         if case[1] >= int(n/2):
-            log('Requesting Search for case: ' + str(case), 'debug')
-            res = search((copy.deepcopy(case[0]), requirments, prefs))
-            log('Result: ' + str(res), 'debug')
-            if res[1] > best[1]:
-                best = res
+            #log('Requesting Search for case: ' + str(case), 'debug')
+            task_id = uuid.uuid4().hex
+            tasks[task_id] = False
+            mssge = (ID, task_id, (copy.deepcopy(case[0]), requirments, prefs))
+            log("Sending: " + str(mssge), 'debug')
+            message = pickle.dumps(mssge)
+            channel.basic_publish(exchange='', routing_key='toSlave', body=message, properties=pika.BasicProperties(delivery_mode=2))
         else:
             ind = 0
             ind_found = False
@@ -143,31 +168,37 @@ def callback(ch, method, properties, body):
                     ind_found = True
                 else:
                     ind += 1
-            log('Ind: ' + str(ind), 'debug')
-            log('Case: ' + str(case), 'debug')
+            #log('Ind: ' + str(ind), 'debug')
+            #log('Case: ' + str(case), 'debug')
             member = case[0][ind][0]
-            log('Member: ' + str(member), 'debug')
+            #log('Member: ' + str(member), 'debug')
             roles = prefs[member][0].keys()
             for role in roles:
                 alloc = copy.deepcopy(case[0])
                 alloc[ind][1] = role
                 stack.append((alloc, case[1] + 1))
 
+    # accept responses
+    channel.basic_consume(queue_name, lambda ch, method, properties, body: task_callback(ch, method, properties, body, best, tasks))
+    channel.start_consuming()
+
     db_events = redis.Redis(host='redis', db=5)
     db_mem_hist = redis.Redis(host='redis', db=7)
-    if best[0]:
-        for allocation in best[0]:
+    if best[0][0]:
+        for allocation in best[0][0]:
             mean = 0
             tot = 0
             for role in prefs[allocation[0]][0]:
                 mean += float(prefs[allocation[0]][0][role])
                 tot += 1
-            val = float(prefs[allocation[0]][1]) + mean/tot - prefs[allocation[0]][0][allocation[1]]
+            #log("Allocation: " + str(allocation), 'debug')
+            val = float(prefs[allocation[0]][1]) + mean/tot - float(prefs[allocation[0]][0][allocation[1]])
             db_mem_hist.set(allocation[0], val)
             log("Updated member: " + str(allocation[0]) + "priority to " + str(val), 'record')
             db_events.hset(ID, allocation[0], allocation[1])
             log("Updated member: " + str(allocation[0]) + "for event: " + str(ID) + " to role: " + str(allocation[1]), 'record')
 
+    channel.close()
     ch.basic_ack(delivery_tag=method.delivery_tag)
     log('Request ' + ID + ' finished', 'record')
     return

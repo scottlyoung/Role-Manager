@@ -1,7 +1,7 @@
 from flask import Flask, request, Response
 import redis
 import pika
-import jsonpickle
+import json
 import os
 import uuid
 
@@ -272,9 +272,14 @@ def get_allocation(group_name, event_name):
     ID = db_events.hget(group_name, event_name)
 
     db = redis.Redis(host='redis', db=5)
+    db_mem = redis.Redis(host='redis', db=8)
 
     status = 200
-    response = db.hgetall(ID)
+    res = db.hgetall(ID)
+    mssge = {}
+    for mem_id in res:
+        mssge[db_mem.get(mem_id).decode('utf-8')] = res[mem_id].decode('utf-8')
+    response = json.dumps(mssge)
     return Response(response=response, status=status, mimetype="application/json")
 
 
