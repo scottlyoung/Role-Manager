@@ -96,7 +96,7 @@ def search(body):
 
 def callback(ch, method, properties, body):
     body = pickle.loads(body)
-    log("Decoded: " + str(body), 'debug')
+    #log("Decoded: " + str(body), 'debug')
 
     prob_id = body[0]
     task_id = body[1]

@@ -39,7 +39,7 @@ channel.queue_declare(queue='toMaster', durable=True)
 def solve(allocations, req, prefs):
     score = 0
     reqs = copy.deepcopy(req)
-    log("checking allocation: " + str(allocations), 'debug')
+    #log("checking allocation: " + str(allocations), 'debug')
     for allocation in allocations:
         reqs[allocation[1]] -= 1
         score += prefs[allocation[0]][0][allocation[1]]*(1.1**prefs[allocation[0]][1])
@@ -59,13 +59,13 @@ def search(body):
         prefs[mem] = (prefs[mem][0], float(prefs[mem][1]))
         for role in prefs[mem][0]:
             prefs[mem][0][role] = float(prefs[mem][0][role])
-    log('search Prefs: ' + str(prefs), 'debug')
+    #log('search Prefs: ' + str(prefs), 'debug')
 
     best = (None, 0)
     stack = [copy.deepcopy(allocations)]
 
     n = len(allocations)
-    log("n: " + str(n), 'debug')
+    #log("n: " + str(n), 'debug')
     while stack:
         case = stack.pop()
         ind = 0
@@ -73,7 +73,7 @@ def search(body):
         while not ind_found:
             if ind == n:
                 res = solve(copy.deepcopy(case), requirments, prefs)
-                log('search Result: ' + str(res), 'debug')
+                #log('search Result: ' + str(res), 'debug')
                 if res[1] > best[1]:
                     best = res
                 break
@@ -157,7 +157,7 @@ def callback(ch, method, properties, body):
             task_id = uuid.uuid4().hex
             tasks[task_id] = False
             mssge = (ID, task_id, (copy.deepcopy(case[0]), requirments, prefs))
-            log("Sending: " + str(mssge), 'debug')
+            #log("Sending: " + str(mssge), 'debug')
             message = pickle.dumps(mssge)
             channel.basic_publish(exchange='', routing_key='toSlave', body=message, properties=pika.BasicProperties(delivery_mode=2))
         else:
